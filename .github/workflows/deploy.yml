@@ -1,0 +1,152 @@
+name: Deploy EC2
+
+# Executa após cada merge (push) na main: testa, publica a imagem no ECR
+# e substitui o contêiner em execução na instância EC2.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Dois deploys nunca disputam a mesma instância; o mais novo espera o anterior.
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: devops-python-api
+  CONTAINER_NAME: devops-python-api
+  APP_PORT: "80"
+
+jobs:
+  tests:
+    name: Testes automatizados
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v6
+
+      - name: Preparar o Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Instalar dependências
+        run: python -m pip install --requirement requirements-dev.txt
+
+      - name: Executar testes
+        run: pytest --cov=app --cov-report=term-missing
+
+  build-and-push:
+    name: Build e publicação no ECR
+    needs: tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v6
+
+      - name: Configurar credenciais da AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Construir a imagem com a tag do commit
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} --tag "$IMAGE" .
+
+      - name: Enviar a imagem ao ECR
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: docker push "$IMAGE"
+
+  deploy:
+    name: Deploy na EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v6
+
+      - name: Configurar credenciais da AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Obter o endereço do ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # O runner do GitHub muda de IP a cada execução. Em vez de abrir a porta 22
+      # para a internet, liberamos apenas o IP deste runner e fechamos no final.
+      - name: Liberar SSH apenas para este runner
+        id: runner
+        env:
+          SECURITY_GROUP_ID: ${{ secrets.EC2_SECURITY_GROUP_ID }}
+        run: |
+          RUNNER_IP="$(curl --fail --silent https://checkip.amazonaws.com)"
+          echo "ip=${RUNNER_IP}" >> "$GITHUB_OUTPUT"
+          if ! aws ec2 authorize-security-group-ingress \
+              --group-id "$SECURITY_GROUP_ID" \
+              --protocol tcp --port 22 --cidr "${RUNNER_IP}/32" 2> authorize.err; then
+            grep -q "InvalidPermission.Duplicate" authorize.err || { cat authorize.err; exit 1; }
+          fi
+
+      - name: Preparar a chave SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+
+      - name: Atualizar o contêiner na EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          ssh -i ~/.ssh/ec2.pem \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            "ubuntu@${EC2_HOST}" \
+            IMAGE="${REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}" \
+            REGISTRY="${REGISTRY}" \
+            AWS_REGION="${AWS_REGION}" \
+            CONTAINER_NAME="${CONTAINER_NAME}" \
+            APP_PORT="${APP_PORT}" \
+            'bash -s' < scripts/deploy-ec2.sh
+
+      - name: Verificar a versão publicada
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          HEALTH="$(curl --fail --silent --retry 5 --retry-delay 3 --retry-all-errors "http://${EC2_HOST}:${APP_PORT}/health")"
+          echo "$HEALTH"
+          echo "$HEALTH" | grep -q "\"commit\":\"${GITHUB_SHA}\""
+
+      - name: Fechar o SSH para este runner
+        if: always() && steps.runner.outputs.ip != ''
+        env:
+          SECURITY_GROUP_ID: ${{ secrets.EC2_SECURITY_GROUP_ID }}
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id "$SECURITY_GROUP_ID" \
+            --protocol tcp --port 22 --cidr "${{ steps.runner.outputs.ip }}/32"
