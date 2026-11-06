@@ -53,7 +53,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Configurar credenciais da AWS
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -84,7 +84,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Configurar credenciais da AWS
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -138,7 +138,7 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
-          HEALTH="$(curl --fail --silent --retry 5 --retry-delay 3 --retry-all-errors "http://${EC2_HOST}:${APP_PORT}/health")"
+          HEALTH="$(curl --fail --silent --connect-timeout 10 --retry 5 --retry-delay 3 --retry-all-errors "http://${EC2_HOST}:${APP_PORT}/health")"
           echo "$HEALTH"
           echo "$HEALTH" | grep -q "\"commit\":\"${GITHUB_SHA}\""
 
