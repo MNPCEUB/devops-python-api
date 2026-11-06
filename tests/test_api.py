@@ -18,6 +18,7 @@ def test_root_points_to_docs() -> None:
 
     assert response.status_code == 200
     assert response.json()["docs"] == "/docs"
+    assert "1.1.0" in response.json()["message"]
 
 
 def test_health_returns_version(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,7 +27,7 @@ def test_health_returns_version(monkeypatch: pytest.MonkeyPatch) -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "1.0.0", "commit": "local"}
+    assert response.json() == {"status": "ok", "version": "1.1.0", "commit": "local"}
 
 
 def test_health_returns_deployed_commit(monkeypatch: pytest.MonkeyPatch) -> None:
