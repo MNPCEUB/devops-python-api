@@ -13,11 +13,28 @@ def clear_tasks() -> None:
     tasks.clear()
 
 
-def test_health_returns_version() -> None:
+def test_root_points_to_docs() -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.json()["docs"] == "/docs"
+
+
+def test_health_returns_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GIT_SHA", raising=False)
+
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "1.0.0"}
+    assert response.json() == {"status": "ok", "version": "1.0.0", "commit": "local"}
+
+
+def test_health_returns_deployed_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_SHA", "abc1234")
+
+    response = client.get("/health")
+
+    assert response.json()["commit"] == "abc1234"
 
 
 def test_list_starts_empty() -> None:
