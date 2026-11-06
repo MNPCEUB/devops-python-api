@@ -164,21 +164,22 @@ As credenciais do Learner Lab expiram ao final de cada sessão do laboratório; 
 
 ## Acesso à API publicada
 
-- Saúde e versão: `http://<IP-PÚBLICO-DA-EC2>/health`
-- Swagger: `http://<IP-PÚBLICO-DA-EC2>/docs`
+- Saúde e versão: <http://54.82.38.230/health>
+- Swagger: <http://54.82.38.230/docs>
+- Tarefas: <http://54.82.38.230/tasks>
 
-> O IP público muda quando a instância é parada e iniciada novamente.
+> A instância roda no AWS Academy Learner Lab: ela fica disponível apenas durante a sessão do laboratório, e o IP público muda quando a instância é iniciada novamente. Nesse caso, basta atualizar o secret `EC2_HOST` e executar o workflow **Deploy EC2** pela aba **Actions**.
 
 ## Como verificar a versão implantada
 
 ```bash
-curl http://<IP-PÚBLICO-DA-EC2>/health
+curl http://54.82.38.230/health
 ```
 
 Resposta esperada:
 
 ```json
-{"status": "ok", "version": "1.0.0", "commit": "<SHA do último merge na main>"}
+{"status": "ok", "version": "1.1.0", "commit": "<SHA do último merge na main>"}
 ```
 
 - `version` muda quando a aplicação é alterada (ex.: `1.0.0` → `1.1.0`).
@@ -187,21 +188,60 @@ Resposta esperada:
 
 ## Evidências
 
-As capturas de tela ficam em [`docs/evidencias/`](docs/evidencias/).
-
-| Evidência | Arquivo |
-|---|---|
-| CI executado com sucesso no Pull Request | `docs/evidencias/01-ci-pr.png` |
-| Imagem publicada no ECR com a tag do commit | `docs/evidencias/02-ecr.png` |
-| Pipeline de deploy concluída | `docs/evidencias/03-deploy.png` |
-| Contêiner em execução na EC2 (`docker ps`) | `docs/evidencias/04-docker-ps.png` |
-| API acessível no navegador — versão 1 | `docs/evidencias/05-api-v1.png` |
-| API acessível no navegador — versão 2 (deploy automático) | `docs/evidencias/06-api-v2.png` |
+As capturas de tela ficam em [`docs/evidencias/`](docs/evidencias/). Os registros completos de cada execução estão na aba [Actions](https://github.com/MNPCEUB/devops-python-api/actions).
 
 ### Pull Requests
 
-- PR 1 — implementação da esteira CI/CD: _link_
-- PR 2 — atualização da versão (demonstração do deploy automático): _link_
+| PR | Objetivo | Resultado |
+|---|---|---|
+| [#1](https://github.com/MNPCEUB/devops-python-api/pull/1) | Implementação da esteira CI/CD (`feature/ci-cd-ec2`) | merge `f553731` → deploy da versão `1.0.0` |
+| [#2](https://github.com/MNPCEUB/devops-python-api/pull/2) | Nova versão da API (`feature/versao-1.1.0`) | merge `c37ece3` → deploy da versão `1.1.0` |
+
+### Integração contínua
+
+Execuções do `ci.yml` disparadas pelos Pull Requests, com os jobs de qualidade, testes e container aprovados:
+
+![Execuções do CI](docs/evidencias/01-ci-execucoes.webp)
+
+![CI do PR da versão 1.1.0](docs/evidencias/02-ci-pr-versao-1.1.0.webp)
+
+### Amazon ECR
+
+Repositório privado `devops-python-api`. Cada deploy publica uma imagem com a tag igual ao SHA do commit, por exemplo `devops-python-api:c37ece306d15be2891f8efdade605d136e60380f`.
+
+![Repositório no ECR](docs/evidencias/03-ecr-repositorio.png)
+
+### Instância EC2
+
+A instância usa a IAM Role `LabRole` (via `LabInstanceProfile`) para ler o ECR, sem chaves de acesso gravadas no servidor:
+
+![IAM Role da instância](docs/evidencias/04-ec2-iam-role.webp)
+
+Regras de entrada: HTTP (80) aberto para a API; SSH (22) apenas para o EC2 Instance Connect e para o IP do runner durante o deploy:
+
+![Security Group](docs/evidencias/05-security-group.webp)
+
+### Deploy contínuo
+
+Primeiro deploy, após o merge do PR #1:
+
+![Deploy da versão 1.0.0](docs/evidencias/06-deploy-v1.0.0.webp)
+
+Resposta da API registrada pelo próprio pipeline no step **Verificar a versão publicada**:
+
+```json
+{"status":"ok","version":"1.0.0","commit":"f5537317d094e63fd259b919c6375436e85eca86"}
+```
+
+### Atualização automática
+
+Segundo deploy, disparado apenas pelo merge do PR #2, sem nenhum comando manual na instância:
+
+![Deploy da versão 1.1.0](docs/evidencias/07-deploy-v1.1.0.webp)
+
+API publicada na EC2 exibindo a nova versão e o commit do merge:
+
+![API na versão 1.1.0](docs/evidencias/08-api-v1.1.0.webp)
 
 ## Encerramento dos recursos
 
