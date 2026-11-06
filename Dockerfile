@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1
 FROM python:3.13-slim
 
+# Commit que gerou a imagem; exibido em /health para conferir a versão implantada.
+ARG GIT_SHA=local
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    GIT_SHA=${GIT_SHA}
 
 WORKDIR /app
 

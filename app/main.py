@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -36,7 +38,11 @@ def root() -> dict[str, str]:
 def health() -> dict[str, str]:
     """Endpoint usado por pessoas, containers e pipelines para verificar a API."""
 
-    return {"status": "ok", "version": app.version}
+    return {
+        "status": "ok",
+        "version": app.version,
+        "commit": os.getenv("GIT_SHA", "local"),
+    }
 
 
 @app.get("/tasks", response_model=list[Task])
